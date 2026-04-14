@@ -62,7 +62,10 @@ def send_event(state):
             response = sock.recv(4096)
             sock.close()
             if response:
-                return json.loads(response.decode())
+                try:
+                    return json.loads(response.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                    return None
         else:
             sock.close()
 

@@ -57,6 +57,7 @@ actor ConversationParser {
 
     /// Cache of parsed conversation info, keyed by session file path
     private var cache: [String: CachedInfo] = [:]
+    private let maxCacheEntries = 100
 
     private var incrementalState: [String: IncrementalParseState] = [:]
 
@@ -123,6 +124,10 @@ actor ConversationParser {
         }
 
         let info = parseContent(content)
+        if cache.count >= maxCacheEntries {
+            let keysToRemove = Array(cache.keys.prefix(cache.count / 2))
+            keysToRemove.forEach { cache.removeValue(forKey: $0) }
+        }
         cache[sessionFile] = CachedInfo(modificationDate: modDate, info: info)
 
         return info
@@ -171,7 +176,7 @@ actor ConversationParser {
             if type == "user" && !isMeta {
                 if let message = json["message"] as? [String: Any],
                    let msgContent = message["content"] as? String {
-                    if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
+                    if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<command-message>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
                         firstUserMessage = Self.truncateMessage(msgContent, maxLength: 50)
                         break
                     }
@@ -193,7 +198,7 @@ actor ConversationParser {
                     let isMeta = json["isMeta"] as? Bool ?? false
                     if !isMeta, let message = json["message"] as? [String: Any] {
                         if let msgContent = message["content"] as? String {
-                            if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
+                            if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<command-message>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
                                 lastMessage = msgContent
                                 lastMessageRole = type
                             }
@@ -224,7 +229,7 @@ actor ConversationParser {
                 let isMeta = json["isMeta"] as? Bool ?? false
                 if !isMeta, let message = json["message"] as? [String: Any] {
                     if let msgContent = message["content"] as? String {
-                        if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
+                        if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<command-message>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
                             if let timestampStr = json["timestamp"] as? String {
                                 lastUserMessageDate = formatter.date(from: timestampStr)
                             }
@@ -491,9 +496,14 @@ actor ConversationParser {
         return incrementalState[sessionId]?.structuredResults ?? [:]
     }
 
-    /// Reset incremental state for a session (call when reloading)
-    func resetState(for sessionId: String) {
+    /// Reset incremental state for a session (call when reloading or session ends)
+    /// Pass cwd to also clear the conversation info cache for this session.
+    func resetState(for sessionId: String, cwd: String? = nil) {
         incrementalState.removeValue(forKey: sessionId)
+        if let cwd = cwd {
+            let filePath = Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
+            cache.removeValue(forKey: filePath)
+        }
     }
 
     /// Check if a /clear command was detected during the last parse
@@ -563,7 +573,7 @@ actor ConversationParser {
         var blocks: [MessageBlock] = []
 
         if let content = messageDict["content"] as? String {
-            if content.hasPrefix("<command-name>") || content.hasPrefix("<local-command") || content.hasPrefix("Caveat:") {
+            if content.hasPrefix("<command-name>") || content.hasPrefix("<command-message>") || content.hasPrefix("<local-command") || content.hasPrefix("Caveat:") {
                 return nil
             }
             if content.hasPrefix("[Request interrupted by user") {

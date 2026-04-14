@@ -142,8 +142,10 @@ actor SessionStore {
         session.lastActivity = Date()
 
         if event.status == "ended" {
+            let cwd = session.cwd
             sessions.removeValue(forKey: sessionId)
             cancelPendingSync(sessionId: sessionId)
+            await ConversationParser.shared.resetState(for: sessionId, cwd: cwd)
             return
         }
 
@@ -926,8 +928,10 @@ actor SessionStore {
     // MARK: - Session End Processing
 
     private func processSessionEnd(sessionId: String) async {
+        let cwd = sessions[sessionId]?.cwd
         sessions.removeValue(forKey: sessionId)
         cancelPendingSync(sessionId: sessionId)
+        await ConversationParser.shared.resetState(for: sessionId, cwd: cwd)
     }
 
     // MARK: - History Loading

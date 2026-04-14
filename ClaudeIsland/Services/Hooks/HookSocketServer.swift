@@ -375,9 +375,21 @@ class HookSocketServer {
         var buffer = [UInt8](repeating: 0, count: 131072)
         var pollFd = pollfd(fd: clientSocket, events: Int16(POLLIN), revents: 0)
 
-        let startTime = Date()
-        while Date().timeIntervalSince(startTime) < 0.5 {
-            let pollResult = poll(&pollFd, 1, 50)
+        var deadline = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &deadline)
+        deadline.tv_nsec += 500_000_000
+        if deadline.tv_nsec >= 1_000_000_000 {
+            deadline.tv_sec += 1
+            deadline.tv_nsec -= 1_000_000_000
+        }
+
+        while true {
+            var now = timespec()
+            clock_gettime(CLOCK_MONOTONIC, &now)
+            let remainingMs = (deadline.tv_sec - now.tv_sec) * 1000
+                + (deadline.tv_nsec - now.tv_nsec) / 1_000_000
+            guard remainingMs > 0 else { break }
+            let pollResult = poll(&pollFd, 1, Int32(min(remainingMs, 50)))
 
             if pollResult > 0 && (pollFd.revents & Int16(POLLIN)) != 0 {
                 let bytesRead = read(clientSocket, &buffer, buffer.count)
