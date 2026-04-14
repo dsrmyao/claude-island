@@ -153,11 +153,12 @@ class HookSocketServer {
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
+        let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
         Self.socketPath.withCString { ptr in
             withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
                 let pathBufferPtr = UnsafeMutableRawPointer(pathPtr)
                     .assumingMemoryBound(to: CChar.self)
-                _ = strlcpy(pathBufferPtr, ptr, MemoryLayout.size(ofValue: addr.sun_path))
+                _ = strlcpy(pathBufferPtr, ptr, sunPathSize)
             }
         }
 
