@@ -157,7 +157,7 @@ class HookSocketServer {
             withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
                 let pathBufferPtr = UnsafeMutableRawPointer(pathPtr)
                     .assumingMemoryBound(to: CChar.self)
-                strcpy(pathBufferPtr, ptr)
+                _ = strlcpy(pathBufferPtr, ptr, MemoryLayout.size(ofValue: addr.sun_path))
             }
         }
 

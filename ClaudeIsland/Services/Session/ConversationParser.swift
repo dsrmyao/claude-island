@@ -147,14 +147,17 @@ actor ConversationParser {
 
         let formatter = Self.isoFormatter
 
-        // First pass: collect usage from all assistant messages
+        // Forward pass: collect usage tokens and find first non-system user message
         for line in lines {
-            guard let lineData = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+            guard let lineData = line.data(using: .utf8) else { continue }
+            guard let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                Self.logger.debug("Failed to parse JSONL line in parseContent: \(line.prefix(80), privacy: .public)")
                 continue
             }
 
-            if json["type"] as? String == "assistant",
+            let type = json["type"] as? String
+
+            if type == "assistant",
                let message = json["message"] as? [String: Any],
                let usageDict = message["usage"] as? [String: Any] {
                 usage.inputTokens += usageDict["input_tokens"] as? Int ?? 0
@@ -162,32 +165,22 @@ actor ConversationParser {
                 usage.cacheReadTokens += usageDict["cache_read_input_tokens"] as? Int ?? 0
                 usage.cacheCreationTokens += usageDict["cache_creation_input_tokens"] as? Int ?? 0
             }
-        }
 
-        for line in lines {
-            guard let lineData = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
-                continue
-            }
-
-            let type = json["type"] as? String
-            let isMeta = json["isMeta"] as? Bool ?? false
-
-            if type == "user" && !isMeta {
-                if let message = json["message"] as? [String: Any],
-                   let msgContent = message["content"] as? String {
-                    if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<command-message>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
-                        firstUserMessage = Self.truncateMessage(msgContent, maxLength: 50)
-                        break
-                    }
-                }
+            if firstUserMessage == nil,
+               type == "user",
+               !(json["isMeta"] as? Bool ?? false),
+               let message = json["message"] as? [String: Any],
+               let msgContent = message["content"] as? String,
+               !Self.isSystemMessage(msgContent) {
+                firstUserMessage = Self.truncateMessage(msgContent, maxLength: 50)
             }
         }
 
         var foundLastUserMessage = false
         for line in lines.reversed() {
-            guard let lineData = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+            guard let lineData = line.data(using: .utf8) else { continue }
+            guard let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                Self.logger.debug("Failed to parse JSONL line in reverse pass: \(line.prefix(80), privacy: .public)")
                 continue
             }
 
@@ -198,7 +191,7 @@ actor ConversationParser {
                     let isMeta = json["isMeta"] as? Bool ?? false
                     if !isMeta, let message = json["message"] as? [String: Any] {
                         if let msgContent = message["content"] as? String {
-                            if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<command-message>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
+                            if !Self.isSystemMessage(msgContent) {
                                 lastMessage = msgContent
                                 lastMessageRole = type
                             }
@@ -229,7 +222,7 @@ actor ConversationParser {
                 let isMeta = json["isMeta"] as? Bool ?? false
                 if !isMeta, let message = json["message"] as? [String: Any] {
                     if let msgContent = message["content"] as? String {
-                        if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<command-message>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
+                        if !Self.isSystemMessage(msgContent) {
                             if let timestampStr = json["timestamp"] as? String {
                                 lastUserMessageDate = formatter.date(from: timestampStr)
                             }
@@ -301,6 +294,14 @@ actor ConversationParser {
             }
         }
         return ""
+    }
+
+    /// Returns true for internal/system messages that should not be shown to the user
+    private static func isSystemMessage(_ content: String) -> Bool {
+        content.hasPrefix("<command-name>") ||
+        content.hasPrefix("<command-message>") ||
+        content.hasPrefix("<local-command") ||
+        content.hasPrefix("Caveat:")
     }
 
     /// Truncate message for display
@@ -573,7 +574,7 @@ actor ConversationParser {
         var blocks: [MessageBlock] = []
 
         if let content = messageDict["content"] as? String {
-            if content.hasPrefix("<command-name>") || content.hasPrefix("<command-message>") || content.hasPrefix("<local-command") || content.hasPrefix("Caveat:") {
+            if Self.isSystemMessage(content) {
                 return nil
             }
             if content.hasPrefix("[Request interrupted by user") {

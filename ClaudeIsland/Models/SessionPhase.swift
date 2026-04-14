@@ -55,10 +55,12 @@ struct PermissionContext: Sendable {
 
 extension PermissionContext: Equatable {
     nonisolated static func == (lhs: PermissionContext, rhs: PermissionContext) -> Bool {
-        // Compare by identity fields only (AnyCodable doesn't conform to Equatable)
+        // toolUseId is a UUID generated per invocation and is sufficient for identity.
+        // Also compare formattedInput as a proxy for toolInput (AnyCodable is not Equatable).
         lhs.toolUseId == rhs.toolUseId &&
         lhs.toolName == rhs.toolName &&
-        lhs.receivedAt == rhs.receivedAt
+        lhs.receivedAt == rhs.receivedAt &&
+        lhs.formattedInput == rhs.formattedInput
     }
 }
 
